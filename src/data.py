@@ -59,7 +59,7 @@ def load_raw_datasets(
 
     repo_id = "McAuley-Lab/Amazon-Reviews-2023"
 
-    meta_file = f"raw_meta_{category}/raw_meta_{category}/full-00000-of-00001.parquet"
+    meta_file = f"raw_meta_{category}/full-00000-of-00001.parquet"
     review_file = f"raw/review_categories/{category}.jsonl"
 
     print(f"Loading metadata parquet: {meta_file}")
