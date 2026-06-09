@@ -127,20 +127,85 @@ def _parse_categories(raw: Any) -> str:
     return str(raw)
 
 
+def _scalar_value(val: Any) -> Any:
+    if isinstance(val, np.ndarray):
+        if val.size == 0:
+            return None
+        if val.size == 1:
+            return val.item()
+        return val.tolist()
+    return val
+
+
 def _first_image_url(raw: Any) -> str | None:
     if raw is None:
         return None
-    if isinstance(raw, list) and raw:
-        first = raw[0]
-        if isinstance(first, dict):
-            for key in ("hi_res", "large", "thumb", "large_image_url", "medium_image_url"):
-                val = first.get(key)
-                if val:
-                    return str(val)
-        return str(first)
+    if isinstance(raw, float) and np.isnan(raw):
+        return None
+
+    raw = _scalar_value(raw)
+
     if isinstance(raw, str):
-        return raw
+        stripped = raw.strip()
+        if not stripped or stripped.lower() == "nan":
+            return None
+        if stripped.startswith("http"):
+            return stripped
+        if stripped.startswith("[") or stripped.startswith("{"):
+            try:
+                raw = json.loads(stripped.replace("'", '"'))
+            except (json.JSONDecodeError, ValueError):
+                return None
+        else:
+            return None
+
+    if isinstance(raw, dict):
+        for key in ("hi_res", "large", "thumb", "large_image_url", "medium_image_url"):
+            val = _scalar_value(raw.get(key))
+            if val is None:
+                continue
+            if isinstance(val, list):
+                for item in val:
+                    url = _first_image_url(item)
+                    if url:
+                        return url
+                continue
+            val_str = str(val).strip()
+            if val_str.startswith("http"):
+                return val_str
+        return None
+
+    if isinstance(raw, list) and raw:
+        return _first_image_url(raw[0])
+
+    val_str = str(raw).strip()
+    if val_str.startswith("http"):
+        return val_str
     return None
+
+
+def attach_image_urls(
+    products: pd.DataFrame,
+    category: str = DEFAULT_CATEGORY,
+) -> pd.DataFrame:
+    """Ensure product rows have image_url by merging from metadata parquet."""
+    df = products.copy()
+    if "image_url" in df.columns and df["image_url"].notna().any():
+        return df
+
+    from huggingface_hub import hf_hub_download
+
+    meta_file = f"raw_meta_{category}/full-00000-of-00001.parquet"
+    meta_path = hf_hub_download(
+        repo_id="McAuley-Lab/Amazon-Reviews-2023",
+        filename=meta_file,
+        repo_type="dataset",
+    )
+    meta_urls = build_product_table(pd.read_parquet(meta_path))[["product_id", "image_url"]]
+    if "image_url" in df.columns:
+        df = df.drop(columns=["image_url"])
+    df = df.merge(meta_urls, on="product_id", how="left")
+    return df
 
 
 def build_product_table(meta: pd.DataFrame) -> pd.DataFrame:
@@ -320,13 +385,21 @@ def download_product_images(
     products: pd.DataFrame,
     max_images: int = MAX_IMAGES,
     timeout: int = 10,
+    category: str = DEFAULT_CATEGORY,
 ) -> pd.DataFrame:
     """Download and cache product images; return manifest with local paths."""
-    out = products.copy()
-    out = out[out["image_url"].notna()].head(max_images)
+    out = attach_image_urls(products, category=category)
+    if "image_url" not in out.columns:
+        out["image_url"] = None
+    out = out[out["image_url"].notna() & (out["image_url"].astype(str).str.len() > 0)].head(max_images)
+    print(f"Products with image URLs: {len(out)}")
+    if len(out) == 0:
+        raise RuntimeError(
+            "No image URLs found. Check metadata or re-run 00_eda.ipynb."
+        )
+
     local_paths: list[str | None] = []
     ok_flags: list[bool] = []
-
     for _, row in tqdm(out.iterrows(), total=len(out), desc="Downloading images"):
         url = row["image_url"]
         filename = _safe_filename(str(row["product_id"])) + ".jpg"
