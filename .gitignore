@@ -1,0 +1,44 @@
+# Data & artifacts
+data/
+*.csv
+*.parquet
+*.pkl
+*.h5
+*.keras
+*.pt
+*.bin
+*.safetensors
+checkpoints/
+artifacts/
+outputs/
+images/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+wandb/
+mlruns/
+
+# Env secrets
+.env
+.env.*
