@@ -3,7 +3,8 @@ tensorflow>=2.15.0
 keras>=3.0.0
 
 # Data & NLP
-datasets>=2.18.0
+datasets>=2.18.0,<4.0.0
+huggingface_hub>=0.23.0
 transformers>=4.40.0
 sentence-transformers>=2.7.0
 accelerate>=0.30.0

@@ -55,39 +55,51 @@ def load_raw_datasets(
     max_reviews: int = MAX_REVIEWS,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load Amazon Reviews 2023 review + metadata tables for one category."""
-    from datasets import load_dataset
+    from huggingface_hub import hf_hub_download
 
-    review_config = f"raw_review_{category}"
-    meta_config = f"raw_meta_{category}"
+    repo_id = "McAuley-Lab/Amazon-Reviews-2023"
 
-    print(f"Loading reviews: {review_config}")
-    reviews_ds = load_dataset(
-        "McAuley-Lab/Amazon-Reviews-2023",
-        review_config,
-        trust_remote_code=True,
-        split="full",
+    meta_file = f"raw_meta_{category}/raw_meta_{category}/full-00000-of-00001.parquet"
+    review_file = f"raw/review_categories/{category}.jsonl"
+
+    print(f"Loading metadata parquet: {meta_file}")
+    meta_path = hf_hub_download(repo_id=repo_id, filename=meta_file, repo_type="dataset")
+    meta = pd.read_parquet(meta_path)
+
+    if max_products:
+        id_col = "parent_asin" if "parent_asin" in meta.columns else "asin"
+        meta = meta.drop_duplicates(subset=[id_col]).head(max_products)
+
+    product_ids = set(
+        meta["parent_asin"] if "parent_asin" in meta.columns else meta["asin"]
     )
-    print(f"Loading metadata: {meta_config}")
-    meta_ds = load_dataset(
-        "McAuley-Lab/Amazon-Reviews-2023",
-        meta_config,
-        trust_remote_code=True,
-        split="full",
-    )
 
-    reviews = pd.DataFrame(reviews_ds)
-    meta = pd.DataFrame(meta_ds)
-
-    if max_products and "parent_asin" in meta.columns:
-        meta = meta.drop_duplicates(subset=["parent_asin"]).head(max_products)
-    elif max_products and "asin" in meta.columns:
-        meta = meta.drop_duplicates(subset=["asin"]).head(max_products)
-
-    product_ids = set(meta["parent_asin"] if "parent_asin" in meta.columns else meta["asin"])
-    id_col = "parent_asin" if "parent_asin" in reviews.columns else "asin"
-    reviews = reviews[reviews[id_col].isin(product_ids)].head(max_reviews)
+    print(f"Loading reviews jsonl: {review_file}")
+    review_path = hf_hub_download(repo_id=repo_id, filename=review_file, repo_type="dataset")
+    reviews = _load_reviews_jsonl(review_path, product_ids, max_reviews)
 
     return reviews, meta
+
+
+def _load_reviews_jsonl(
+    path: str | Path,
+    product_ids: set[str],
+    max_reviews: int,
+) -> pd.DataFrame:
+    """Stream JSONL reviews and keep rows for selected products."""
+    rows: list[dict[str, Any]] = []
+    with open(path, encoding="utf-8") as fp:
+        for line in fp:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            pid = record.get("parent_asin") or record.get("asin")
+            if pid not in product_ids:
+                continue
+            rows.append(record)
+            if max_reviews and len(rows) >= max_reviews:
+                break
+    return pd.DataFrame(rows)
 
 
 def _safe_float(value: Any, default: float = np.nan) -> float:
@@ -119,7 +131,13 @@ def _first_image_url(raw: Any) -> str | None:
     if raw is None:
         return None
     if isinstance(raw, list) and raw:
-        return str(raw[0])
+        first = raw[0]
+        if isinstance(first, dict):
+            for key in ("hi_res", "large", "thumb", "large_image_url", "medium_image_url"):
+                val = first.get(key)
+                if val:
+                    return str(val)
+        return str(first)
     if isinstance(raw, str):
         return raw
     return None
@@ -200,7 +218,12 @@ def build_review_table(reviews: pd.DataFrame) -> pd.DataFrame:
     df["review_title"] = df.get("title", "").fillna("").astype(str)
     df["review_text"] = df.get("text", "").fillna("").astype(str)
     df["review_length"] = df["review_text"].str.len()
-    df["helpful_vote"] = df.get("helpful_vote", 0).fillna(0).astype(int)
+    if "helpful_votes" in df.columns:
+        df["helpful_vote"] = df["helpful_votes"].fillna(0).astype(int)
+    elif "helpful_vote" in df.columns:
+        df["helpful_vote"] = df["helpful_vote"].fillna(0).astype(int)
+    else:
+        df["helpful_vote"] = 0
     df["verified_purchase"] = df.get("verified_purchase", False).fillna(False).astype(int)
 
     keep = [

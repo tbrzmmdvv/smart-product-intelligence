@@ -89,8 +89,8 @@ Gradio opens in the browser and combines:
 [Hugging Face — Amazon Reviews 2023](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023)
 
 ```python
-from datasets import load_dataset
-reviews = load_dataset("McAuley-Lab/Amazon-Reviews-2023", "raw_review_All_Beauty", trust_remote_code=True)
+from src.data import load_raw_datasets
+reviews, meta = load_raw_datasets(category="All_Beauty")
 ```
 
 ## Troubleshooting
